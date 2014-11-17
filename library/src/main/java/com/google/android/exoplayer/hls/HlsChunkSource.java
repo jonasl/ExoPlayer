@@ -197,8 +197,6 @@ public class HlsChunkSource {
     if (live) {
       if (previousTsChunk == null) {
         startTimeUs = 0;
-      } else if (splicingIn) {
-        startTimeUs = previousTsChunk.startTimeUs;
       } else {
         startTimeUs = previousTsChunk.endTimeUs;
       }
@@ -225,11 +223,6 @@ public class HlsChunkSource {
         variantIndex = idealVariantIndex;
       }
       splicingOut = variantIndex != currentVariantIndex;
-      if (splicingOut) {
-        // If we're splicing out, we want to load the same chunk again next time, but for a
-        // different variant.
-        nextChunkMediaSequence = chunkMediaSequence;
-      }
     }
 
     // Configure the datasource for loading the chunk.
@@ -247,9 +240,6 @@ public class HlsChunkSource {
       extractor = new TsExtractor(startTimeUs, samplePool);
     } else {
       extractor = previousTsChunk.extractor;
-    }
-    if (splicingOut) {
-      extractor.discardFromNextKeyframes();
     }
 
     return new TsChunk(dataSource, dataSpec, extractor, enabledVariants[currentVariantIndex].index,
