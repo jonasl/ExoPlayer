@@ -21,6 +21,7 @@ import com.google.android.exoplayer.SampleHolder;
 import com.google.android.exoplayer.SampleSource;
 import com.google.android.exoplayer.TrackInfo;
 import com.google.android.exoplayer.TrackRenderer;
+import com.google.android.exoplayer.upstream.HttpDataSource;
 import com.google.android.exoplayer.upstream.Loader;
 import com.google.android.exoplayer.upstream.Loader.Loadable;
 import com.google.android.exoplayer.util.Assertions;
@@ -37,6 +38,7 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
 
   private static final long BUFFER_DURATION_US = 20000000;
   private static final int NO_RESET_PENDING = -1;
+  private static final int MAX_LOADABLE_ATTEMPTS = 5;
 
   private final HlsChunkSource chunkSource;
   private final LinkedList<TsExtractor> extractors;
@@ -157,8 +159,8 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
       return false;
     }
     boolean haveSamples = extractors.getFirst().hasSamples();
-    if (!haveSamples && currentLoadableException != null) {
-      throw currentLoadableException;
+    if (!haveSamples) {
+      maybeThrow();
     }
     return haveSamples;
   }
@@ -175,9 +177,7 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
     }
 
     if (onlyReadDiscontinuity || isPendingReset() || extractors.isEmpty()) {
-      if (currentLoadableException != null) {
-        throw currentLoadableException;
-      }
+      maybeThrow();
       return NOTHING_READ;
     }
 
@@ -195,9 +195,7 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
     }
 
     if (!extractor.isPrepared()) {
-      if (currentLoadableException != null) {
-        throw currentLoadableException;
-      }
+      maybeThrow();
       return NOTHING_READ;
     }
 
@@ -218,9 +216,7 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
       return END_OF_STREAM;
     }
 
-    if (currentLoadableException != null) {
-      throw currentLoadableException;
-    }
+    maybeThrow();
     return NOTHING_READ;
   }
 
@@ -298,7 +294,18 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
     currentLoadableException = e;
     currentLoadableExceptionCount++;
     currentLoadableExceptionTimestamp = SystemClock.elapsedRealtime();
+    if (e instanceof HttpDataSource.InvalidResponseCodeException) {
+      // Server is reachable but can't serve our request, don't retry.
+      currentLoadableExceptionFatal = true;
+    }
     maybeStartLoading();
+  }
+
+  private void maybeThrow() throws IOException {
+    if (currentLoadableException != null &&
+        (currentLoadableExceptionFatal || currentLoadableExceptionCount >= MAX_LOADABLE_ATTEMPTS)) {
+      throw currentLoadableException;
+    }
   }
 
   private void restartFrom(long positionUs) {
