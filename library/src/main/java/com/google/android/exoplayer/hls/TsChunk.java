@@ -119,6 +119,10 @@ public final class TsChunk extends HlsChunk {
       int bytesRead = 0;
       while (bytesRead != -1 && !loadCanceled) {
         bytesRead = extractor.read(dataSource);
+        if (bytesRead > 0) {
+          // Update our position so we restart in the right place in case of failure.
+          loadPosition += bytesRead;
+        }
       }
       loadFinished = !loadCanceled;
     } finally {
