@@ -232,7 +232,8 @@ public class HlsChunkSource {
     } else {
       dataSource = upstreamDataSource;
     }
-    DataSpec dataSpec = new DataSpec(chunkUri, 0, C.LENGTH_UNBOUNDED, null);
+    DataSpec dataSpec = new DataSpec(chunkUri, segment.byterangeOffset, segment.byterangeLength,
+        null);
 
     // Configure the extractor that will read the chunk.
     TsExtractor extractor;
@@ -382,11 +383,8 @@ public class HlsChunkSource {
       byte[] secretKey = new byte[data.bytesLeft()];
       data.readBytes(secretKey, 0, secretKey.length);
 
-      int ivParsed = Integer.parseInt(iv, 16);
-      String iv = String.format("%032X", ivParsed);
-
       byte[] ivData = new BigInteger(iv, 16).toByteArray();
-      byte[] ivDataWithPadding = new byte[iv.length() / 2];
+      byte[] ivDataWithPadding = new byte[16];
       System.arraycopy(ivData, 0, ivDataWithPadding, ivDataWithPadding.length - ivData.length,
           ivData.length);
 
