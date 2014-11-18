@@ -132,7 +132,8 @@ public class HlsChunkSource {
       long playbackPositionUs) {
 
     HlsMediaPlaylist mediaPlaylist = mediaPlaylists[variantIndex];
-    if (mediaPlaylist == null) {
+    if (mediaPlaylist == null ||
+        (mediaPlaylist.live && shouldRerequestMediaPlaylist())) {
       return newMediaPlaylistChunk();
     }
 
@@ -257,11 +258,11 @@ public class HlsChunkSource {
   }
 
   private boolean shouldRerequestMediaPlaylist() {
-    // Don't re-request media playlist more often than one-half of the target duration.
+    // Don't re-request media playlist more often than the target duration.
     HlsMediaPlaylist mediaPlaylist = mediaPlaylists[variantIndex];
     long timeSinceLastMediaPlaylistLoadMs =
         SystemClock.elapsedRealtime() - lastMediaPlaylistLoadTimesMs[variantIndex];
-    return timeSinceLastMediaPlaylistLoadMs >= (mediaPlaylist.targetDurationSecs * 1000) / 2;
+    return timeSinceLastMediaPlaylistLoadMs >= (mediaPlaylist.targetDurationSecs * 1000);
   }
 
   private int getLiveStartChunkMediaSequence() {

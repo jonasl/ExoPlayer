@@ -27,6 +27,7 @@ import com.google.android.exoplayer.upstream.Loader.Loadable;
 import com.google.android.exoplayer.util.Assertions;
 
 import android.os.SystemClock;
+import android.util.Log;
 
 import java.io.IOException;
 import java.util.LinkedList;
@@ -35,6 +36,8 @@ import java.util.LinkedList;
  * A {@link SampleSource} for HLS streams.
  */
 public class HlsSampleSource implements SampleSource, Loader.Callback {
+
+  private static final String TAG = "HlsSampleSource";
 
   private static final long BUFFER_DURATION_US = 20000000;
   private static final int NO_RESET_PENDING = -1;
@@ -295,8 +298,24 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
     currentLoadableExceptionCount++;
     currentLoadableExceptionTimestamp = SystemClock.elapsedRealtime();
     if (e instanceof HttpDataSource.InvalidResponseCodeException) {
-      // Server is reachable but can't serve our request, don't retry.
-      currentLoadableExceptionFatal = true;
+      HttpDataSource.InvalidResponseCodeException exception =
+          (HttpDataSource.InvalidResponseCodeException) e;
+      HlsChunk hlsChunk = (HlsChunk)loadable;
+      if (isTsChunk(hlsChunk) && exception.responseCode == 404 && chunkSource.live) {
+        // If this is a live stream and we get a 404, we're likely behind the live window.
+        Log.d(TAG, String.format("Error 404 loading %s, assuming behind live window",
+            hlsChunk.dataSpec.uri));
+        // TODO: Double check that this actually works as expected. We want the chunk source
+        // to update the playlist and select a new live start position because we missed the
+        // train loading the current one. By setting previousTsLoadable to null we should
+        // trigger a discont (new extractors) so this could work. Needs testing.
+        clearCurrentLoadable();
+        previousTsLoadable = null;
+      } else {
+        Log.d(TAG, String.format("Error 404 loading %s, consider fatal",
+            hlsChunk.dataSpec.uri));
+        currentLoadableExceptionFatal = true;
+      }
     }
     maybeStartLoading();
   }
