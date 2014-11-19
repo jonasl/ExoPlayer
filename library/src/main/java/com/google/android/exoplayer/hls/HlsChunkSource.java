@@ -250,9 +250,6 @@ public class HlsChunkSource {
     } else {
       extractor = previousTsChunk.extractor;
     }
-    if (splicingOut) {
-      extractor.discardFromNextKeyframes();
-    }
 
     return new TsChunk(dataSource, dataSpec, extractor, enabledVariants[currentVariantIndex].index,
         startTimeUs, endTimeUs, nextChunkMediaSequence, splicingOut);
