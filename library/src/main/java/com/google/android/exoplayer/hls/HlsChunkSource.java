@@ -368,7 +368,6 @@ public class HlsChunkSource {
 
   private class EncryptionKeyChunk extends BitArrayChunk {
 
-    private static final String ZERO_IV = "00000000000000000000000000000000";
     private final String iv;
 
     public EncryptionKeyChunk(DataSource dataSource, DataSpec dataSpec, String iv) {
@@ -380,23 +379,16 @@ public class HlsChunkSource {
       }
     }
 
-    private byte[] hexStrToByteArray(String hexStr) {
-      final int len = hexStr.length();
-      final byte[] result = new byte[len / 2];
-      for(int i = 0; i < len; i += 2) {
-        result[i / 2] = (byte) ((Character.digit(hexStr.charAt(i), 16) << 4)
-            + Character.digit(hexStr.charAt(i + 1), 16));
-      }
-      return result;
-    }
-
     @Override
     protected void consume(BitArray data) throws IOException {
       byte[] secretKey = new byte[data.bytesLeft()];
       data.readBytes(secretKey, 0, secretKey.length);
 
-      String ivWithPadding = ZERO_IV.substring(this.iv.length()) + this.iv;
-      byte[] ivDataWithPadding = hexStrToByteArray(ivWithPadding);
+      byte[] ivData = new BigInteger(iv, 16).toByteArray();
+      byte[] ivDataWithPadding = new byte[16];
+      System.arraycopy(ivData, 0, ivDataWithPadding, ivDataWithPadding.length - ivData.length,
+          ivData.length);
+
       encryptedDataSource = new Aes128DataSource(secretKey, ivDataWithPadding, upstreamDataSource);
     }
 
