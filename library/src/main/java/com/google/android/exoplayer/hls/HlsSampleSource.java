@@ -277,6 +277,8 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
       currentLoadableExceptionCount++;
       currentLoadableExceptionTimestamp = SystemClock.elapsedRealtime();
       currentLoadableExceptionFatal = true;
+      Log.w(TAG, String.format("onLoadCompleted error: count=%d fatal=%b (%s)",
+          currentLoadableExceptionCount, currentLoadableExceptionFatal, e.getMessage()));
     } finally {
       if (isTsChunk(currentLoadable)) {
         TsChunk tsChunk = (TsChunk) loadable;
@@ -324,12 +326,16 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
         currentLoadableExceptionFatal = true;
       }
     }
+    Log.w(TAG, String.format("onLoadError: count=%d fatal=%b (%s)",
+        currentLoadableExceptionCount, currentLoadableExceptionFatal, e.getMessage()));
     maybeStartLoading();
   }
 
   private void maybeThrow() throws IOException {
     if (currentLoadableException != null &&
         (currentLoadableExceptionFatal || currentLoadableExceptionCount >= MAX_LOADABLE_ATTEMPTS)) {
+      Log.e(TAG, String.format("Throwing error: count=%d fatal=%b",
+          currentLoadableExceptionCount, currentLoadableExceptionFatal));
       throw currentLoadableException;
     }
   }
