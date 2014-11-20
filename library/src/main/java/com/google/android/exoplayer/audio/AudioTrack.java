@@ -490,7 +490,10 @@ public final class AudioTrack {
 
   /** Returns whether {@link #getCurrentPositionUs} can return the current playback position. */
   private boolean hasCurrentPositionUs() {
-    return isInitialized() && mediaSyncFrame != SYNC_NOT_SET;
+    boolean audioTrackPlaying = audioTrack != null
+        && audioTrack.getState() == android.media.AudioTrack.STATE_INITIALIZED
+        && audioTrack.getPlayState() == android.media.AudioTrack.PLAYSTATE_PLAYING;
+    return isInitialized() && mediaSyncFrame != SYNC_NOT_SET && audioTrackPlaying;
   }
 
   /** Updates the audio track latency and playback position parameters. */
