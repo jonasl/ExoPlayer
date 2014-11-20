@@ -15,6 +15,8 @@
  */
 package com.google.android.exoplayer.upstream;
 
+import android.util.Log;
+
 import com.google.android.exoplayer.C;
 import com.google.android.exoplayer.util.Assertions;
 
@@ -37,6 +39,8 @@ import javax.crypto.spec.SecretKeySpec;
  *
  */
 public class Aes128DataSource implements DataSource {
+
+  private static final String TAG = "Aes128DataSource";
 
   private final DataSource upstream;
   private final byte[] secretKey;
@@ -72,8 +76,34 @@ public class Aes128DataSource implements DataSource {
       throw new RuntimeException(e);
     }
 
+    // TODO: We can't start reding from a specific position with our cipher mode.
+    // Must start from 0, read bytes and throw away. This must be tested!
+    int throwAway = 0;
+    if (dataSpec.position != 0) {
+      long newPosition = 0;
+      long newLength = dataSpec.length == C.LENGTH_UNBOUNDED ? C.LENGTH_UNBOUNDED :
+          dataSpec.length + dataSpec.position;
+      throwAway = (int)dataSpec.position;
+      dataSpec = new DataSpec(dataSpec.uri, newPosition, newLength, dataSpec.key);
+      Log.w(TAG, String.format("position=%d, trying to read from start and throw away", throwAway));
+    }
+
     cipherInputStream = new CipherInputStream(
         new DataSourceInputStream(upstream, dataSpec), cipher);
+
+    if (throwAway > 0) {
+      byte[] buffer = new byte[50 * 1024];
+      int bytesRead = 0;
+      while (bytesRead != -1 && throwAway > 0) {
+        bytesRead = cipherInputStream.read(buffer, 0, Math.min(throwAway, buffer.length));
+        if (bytesRead > 0) {
+          throwAway -= bytesRead;
+        }
+      }
+    }
+    if (throwAway > 0) {
+      Log.e(TAG, String.format("Throw away start bytes failed, starting %d bytes off", throwAway));
+    }
 
     return C.LENGTH_UNBOUNDED;
   }

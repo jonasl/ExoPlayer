@@ -310,20 +310,22 @@ public class HlsSampleSource implements SampleSource, Loader.Callback {
       HttpDataSource.InvalidResponseCodeException exception =
           (HttpDataSource.InvalidResponseCodeException) e;
       HlsChunk hlsChunk = (HlsChunk)loadable;
-      if (isTsChunk(hlsChunk) && exception.responseCode == 404 && chunkSource.live) {
-        // If this is a live stream and we get a 404, we're likely behind the live window.
-        Log.d(TAG, String.format("Error 404 loading %s, assuming behind live window",
-            hlsChunk.dataSpec.uri));
-        // TODO: Double check that this actually works as expected. We want the chunk source
-        // to update the playlist and select a new live start position because we missed the
-        // train loading the current one. By setting previousTsLoadable to null we should
-        // trigger a discont (new extractors) so this could work. Needs testing.
-        clearCurrentLoadable();
-        previousTsLoadable = null;
-      } else {
-        Log.d(TAG, String.format("Error 404 loading %s, consider fatal",
-            hlsChunk.dataSpec.uri));
-        currentLoadableExceptionFatal = true;
+      if (isTsChunk(hlsChunk) && exception.responseCode == 404) {
+        if (chunkSource.live) {
+          // If this is a live stream and we get a 404, we're likely behind the live window.
+          Log.d(TAG, String.format("Error 404 loading %s, assuming behind live window",
+              hlsChunk.dataSpec.uri));
+          // TODO: Double check that this actually works as expected. We want the chunk source
+          // to update the playlist and select a new live start position because we missed the
+          // train loading the current one. By setting previousTsLoadable to null we should
+          // trigger a discont (new extractors) so this could work. Needs testing.
+          clearCurrentLoadable();
+          previousTsLoadable = null;
+        } else {
+          Log.d(TAG, String.format("Error 404 loading %s, consider fatal",
+              hlsChunk.dataSpec.uri));
+          currentLoadableExceptionFatal = true;
+        }
       }
     }
     Log.w(TAG, String.format("onLoadError: count=%d fatal=%b (%s)",
