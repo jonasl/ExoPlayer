@@ -23,11 +23,13 @@ import com.google.android.exoplayer.upstream.Aes128DataSource;
 import com.google.android.exoplayer.upstream.BandwidthMeter;
 import com.google.android.exoplayer.upstream.DataSource;
 import com.google.android.exoplayer.upstream.DataSpec;
+import com.google.android.exoplayer.util.Assertions;
 import com.google.android.exoplayer.util.BitArray;
 import com.google.android.exoplayer.util.Util;
 
 import android.net.Uri;
 import android.os.SystemClock;
+import android.util.Log;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -45,9 +47,13 @@ import java.util.Locale;
  */
 public class HlsChunkSource {
 
+  private static final String TAG = "HlsChunkSource";
+
   private static final float BANDWIDTH_FRACTION = 0.8f;
   private static final long MIN_BUFFER_TO_SWITCH_UP_US = 5000000;
   private static final long MAX_BUFFER_TO_SWITCH_DOWN_US = 15000000;
+  private static final long MIN_BUFFER_TO_SWITCH_DOWN_US = 3000000;
+  private static final boolean DEBUG_SWITCHING = true; // TODO: set to false.
 
   private final SamplePool samplePool = new TsExtractor.SamplePool();
   private final DataSource upstreamDataSource;
@@ -216,12 +222,16 @@ public class HlsChunkSource {
     if (splicingIn) {
       // Do nothing.
     } else if (enableAdaptive && nextChunkMediaSequence != -1) {
-      int idealVariantIndex = getVariantIndexForBandwdith(
-          (int) (bandwidthMeter.getBitrateEstimate() * BANDWIDTH_FRACTION));
+      // TODO: With this logic two segments of a stream are always downloaded at the initial
+      // bit rate before we consider switching. In many cases that's too slow, iOS switches
+      // already after the first segment. The whole splice in/out business complicates fixing
+      // this cleanly, but it really should be fixed.
+      int currentBandwidth = (int)(bandwidthMeter.getBitrateEstimate() * BANDWIDTH_FRACTION);
       long bufferedUs = startTimeUs - playbackPositionUs;
-      if ((idealVariantIndex > currentVariantIndex && bufferedUs < MAX_BUFFER_TO_SWITCH_DOWN_US)
-          || (idealVariantIndex < currentVariantIndex && bufferedUs > MIN_BUFFER_TO_SWITCH_UP_US)) {
-        variantIndex = idealVariantIndex;
+      if (previousTsChunk != null && previousTsChunk.isLoadFinished()) {
+        maybeSwitchVariantEx(previousTsChunk, currentBandwidth, bufferedUs);
+      } else {
+        maybeSwitchVariantSimple(currentBandwidth, bufferedUs);
       }
       splicingOut = variantIndex != currentVariantIndex;
     }
@@ -248,7 +258,107 @@ public class HlsChunkSource {
         startTimeUs, endTimeUs, nextChunkMediaSequence, splicingOut);
   }
 
-  private int getVariantIndexForBandwdith(int bandwidth) {
+  private void maybeSwitchVariantSimple(int currentBandwidth, long bufferedUs) {
+    int idealVariantIndex = getVariantIndexForBandwidth(currentBandwidth);
+    if ((idealVariantIndex > variantIndex && bufferedUs < MAX_BUFFER_TO_SWITCH_DOWN_US)
+        || (idealVariantIndex < variantIndex && bufferedUs > MIN_BUFFER_TO_SWITCH_UP_US)) {
+      variantIndex = idealVariantIndex;
+    }
+  }
+
+  private void maybeSwitchVariantEx(TsChunk previousTsChunk, int currentBandwidth, long bufferedUs) {
+    // Notations here are from the paper "Rate Adaptation for Adaptive HTTP Streaming"
+    // by Chenghao Liu, Imed Bouazizi, Moncef Gabbouj
+    double mediaSegmentTime = (double)(previousTsChunk.endTimeUs - previousTsChunk.startTimeUs);
+    double segmentFetchTime = (double)previousTsChunk.getFetchTimeUs();
+    Assertions.checkArgument(segmentFetchTime > 0);
+    double mu = mediaSegmentTime / segmentFetchTime;
+    double epsilon = getVariantEpsilon(variantIndex);
+    double gamma = 0.7; // This is a tunable step down factor
+    int segmentBandwidth = (int)(mu * enabledVariants[variantIndex].bandwidth);
+    int effectiveBandwidth = Math.min(currentBandwidth, segmentBandwidth);
+    if (DEBUG_SWITCHING) {
+      Log.d(TAG, String.format("%d mu=%2.2f epsilon=%2.2f buffered=%2.2f stream=%2.2f"
+              + " next=%2.2f prev=%2.2f current=%2.2f segment=%2.2f",
+          variantIndex,
+          mu, epsilon, bufferedUs / 1000000.0,
+          bpsToMbps(enabledVariants[variantIndex].bandwidth),
+          bpsToMbps(enabledVariants[Math.max(0, variantIndex - 1)].bandwidth),
+          bpsToMbps(enabledVariants[Math.min(enabledVariants.length - 1, variantIndex + 1)].bandwidth),
+          bpsToMbps(currentBandwidth),
+          bpsToMbps(segmentBandwidth)
+      ));
+    }
+    if ((mu > (1 + epsilon)) && bufferedUs >= MIN_BUFFER_TO_SWITCH_UP_US) {
+      // Step up if our bandwidth meter says we can (and if there's a higher bps variant)
+      if (variantIndex == 0) {
+        // Can't step up, already at highest bit rate
+      } else {
+        // If we're fetching much faster than stream rate, step up faster.
+        boolean changed = false;
+        double nextEpsilon = getVariantEpsilon(variantIndex - 1);
+        double totalEpsilon = epsilon + 2 * nextEpsilon;
+        int step = mu > (1 + totalEpsilon) ? 2 : 1;
+        while (variantIndex - step < 0) {
+          step--;
+        }
+        // Try to make really sure we can handle the step up
+        for (int i = step; i >= 0; i--) {
+          if (enabledVariants[variantIndex - step].bandwidth <= effectiveBandwidth) {
+            if (DEBUG_SWITCHING) {
+              Log.d(TAG, String.format(" Step up %d (%d->%d). current=%2.2f stream=%2.2f" +
+                      " new=%2.2f %2.2f %2.2f",
+                  step, variantIndex, variantIndex - step,
+                  bpsToMbps(currentBandwidth),
+                  bpsToMbps(enabledVariants[variantIndex].bandwidth),
+                  bpsToMbps(enabledVariants[variantIndex - step].bandwidth),
+                  nextEpsilon, totalEpsilon));
+            }
+            variantIndex -= step;
+            changed = true;
+            break;
+          }
+        }
+        if (!changed && DEBUG_SWITCHING) {
+          Log.d(TAG, String.format(" NOT stepping up. current=%2.2f stream=%2.2f next=%2.2f" +
+              " %2.2f %2.2f",
+              bpsToMbps(currentBandwidth),
+              bpsToMbps(enabledVariants[variantIndex - 0].bandwidth),
+              bpsToMbps(enabledVariants[variantIndex - 1].bandwidth),
+              nextEpsilon, totalEpsilon));
+        }
+      }
+    } else if ((mu < gamma && bufferedUs < MAX_BUFFER_TO_SWITCH_DOWN_US)
+        || (mu < 1 && bufferedUs < MIN_BUFFER_TO_SWITCH_DOWN_US)) {
+      // We're switching down fast to avoid buffer under run
+      int newIndex = getVariantIndexForBandwidth(Math.min(currentBandwidth, segmentBandwidth));
+      if (DEBUG_SWITCHING) {
+        Log.d(TAG, String.format(" Switch down" +
+                " current=%2.2f segment=%2.2f stream=%2.2f new=%2.2f",
+            bpsToMbps(currentBandwidth),
+            bpsToMbps(segmentBandwidth),
+            bpsToMbps(enabledVariants[variantIndex].bandwidth),
+            bpsToMbps(enabledVariants[newIndex].bandwidth)));
+      }
+      variantIndex = newIndex;
+    }
+  }
+
+  private double getVariantEpsilon(int index) {
+    if (enabledVariants.length < 2 || index < 1) {
+      return 0.0;
+    }
+
+    double br_higher  = (double)enabledVariants[index - 1].bandwidth;
+    double br_current = (double)enabledVariants[index - 0].bandwidth;
+    return (br_higher - br_current) / br_current;
+  }
+
+  private static double bpsToMbps(int bps) {
+    return bps / (1024.0 * 1024.0);
+  }
+
+  private int getVariantIndexForBandwidth(int bandwidth) {
     for (int i = 0; i < enabledVariants.length - 1; i++) {
       if (enabledVariants[i].bandwidth <= bandwidth) {
         return i;

@@ -56,6 +56,9 @@ public final class TsChunk extends HlsChunk {
   private volatile boolean loadFinished;
   private volatile boolean loadCanceled;
 
+  private long loadStartUs;
+  private long loadEndUs;
+
   /**
    * @param dataSource A {@link DataSource} for loading the data.
    * @param dataSpec Defines the data to be loaded.
@@ -75,6 +78,8 @@ public final class TsChunk extends HlsChunk {
     this.endTimeUs = endTimeUs;
     this.nextChunkIndex = nextChunkIndex;
     this.splicingOut = splicingOut;
+    this.loadStartUs = Long.MIN_VALUE;
+    this.loadEndUs = Long.MIN_VALUE;
   }
 
   @Override
@@ -103,6 +108,13 @@ public final class TsChunk extends HlsChunk {
     return loadCanceled;
   }
 
+  /*package */ long getFetchTimeUs() {
+    if (!loadFinished) {
+      return -1;
+    }
+    return Math.max(1, loadEndUs - loadStartUs);
+  }
+
   @Override
   public void load() throws IOException, InterruptedException {
     DataSpec loadDataSpec;
@@ -115,6 +127,9 @@ public final class TsChunk extends HlsChunk {
           remainingLength, dataSpec.key);
     }
     try {
+      if (loadStartUs < 0) {
+        loadStartUs = System.nanoTime() / 1000;
+      }
       dataSource.open(loadDataSpec);
       int bytesRead = 0;
       while (bytesRead != -1 && !loadCanceled) {
@@ -125,6 +140,9 @@ public final class TsChunk extends HlsChunk {
         }
       }
       loadFinished = !loadCanceled;
+      if (loadFinished) {
+        loadEndUs = System.nanoTime() / 1000;
+      }
     } finally {
       dataSource.close();
     }
