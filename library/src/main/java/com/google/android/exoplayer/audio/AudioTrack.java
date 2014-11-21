@@ -167,6 +167,15 @@ public final class AudioTrack {
   }
 
   /**
+   * Set known output latency.
+   *
+   * @param latencyMs The output latency in ms.
+   */
+  public void setOutputLatency(int latencyMs) {
+    latencyUs = latencyMs * 1000;
+  }
+
+  /**
    * Returns whether the audio track has been successfully initialized via {@link #initialize} and
    * not yet {@link #reset}.
    */

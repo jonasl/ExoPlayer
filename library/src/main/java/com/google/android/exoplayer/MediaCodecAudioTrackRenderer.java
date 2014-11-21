@@ -179,6 +179,15 @@ public class MediaCodecAudioTrackRenderer extends MediaCodecTrackRenderer {
     this.audioSessionId = AudioTrack.SESSION_ID_NOT_SET;
   }
 
+  /**
+   * Set known output latency.
+   *
+   * @param latencyMs The output latency in ms.
+   */
+  public void setOutputLatency(int latencyMs) {
+    audioTrack.setOutputLatency(latencyMs);
+  }
+
   @Override
   protected boolean isTimeSource() {
     return true;
