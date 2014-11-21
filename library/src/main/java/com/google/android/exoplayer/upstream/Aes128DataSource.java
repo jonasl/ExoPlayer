@@ -46,7 +46,6 @@ public class Aes128DataSource implements DataSource {
   private final byte[] secretKey;
   private final byte[] iv;
 
-  private Cipher cipher;
   private CipherInputStream cipherInputStream;
 
   public Aes128DataSource(byte[] secretKey, byte[] iv, DataSource upstream) {
@@ -57,6 +56,7 @@ public class Aes128DataSource implements DataSource {
 
   @Override
   public long open(DataSpec dataSpec) throws IOException {
+    Cipher cipher;
     try {
       cipher = Cipher.getInstance("AES/CBC/PKCS7Padding");
     } catch (NoSuchAlgorithmException e) {
@@ -110,6 +110,7 @@ public class Aes128DataSource implements DataSource {
 
   @Override
   public void close() throws IOException {
+    cipherInputStream = null;
     upstream.close();
   }
 
